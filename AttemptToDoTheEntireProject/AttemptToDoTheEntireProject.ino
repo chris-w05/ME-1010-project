@@ -95,6 +95,7 @@ int nEncoderSteps = 0;
 bool stepCounted = false;
 float lastXPos = 0;
 float xPosition = 0;
+float xPositionTimeBased = 0;
 float accumulatedX = 0;
 float dX = 0;
 float shootAtX;

@@ -10,17 +10,30 @@ float brake(){
   return 0.0;
 }
 
+float xPosFromTime(){
+  if(currentState != LOADING){
+    const float motorVel = .01; // m/s
+    if( motorDirection == LOW){
+      xPositionTimeBased += motorVel/CYCLETIME;
+    }
+    else if( motorDirection == HIGH ){
+      xPositionTimeBased -= motorVel/CYCLETIME;
+    }
+  }
+  return xPositionTimeBased;
+}
+
 float xPosFromEncoder(){
   if( !stepCounted ){
     //detect if the encoder is more or less in the center of a black or white square (high or low value)
     //add a step if moving in the positve direction
-    if( ((analogRead(irPin) > irHighThresh) || (analogRead(irPin) < irLowThresh)) && (motorDirection = LOW) ){
+    if( ((analogRead(irPin) > irHighThresh) || (analogRead(irPin) < irLowThresh)) && (motorDirection == LOW) ){
       nEncoderSteps ++;
       stepCounted = true;
       Serial.println("1");
     }
     //remove a step if moving in the negative direction 
-    if( ((analogRead(irPin) > irHighThresh) || (analogRead(irPin) < irLowThresh)) && (motorDirection = HIGH) ){
+    if( ((analogRead(irPin) > irHighThresh) || (analogRead(irPin) < irLowThresh)) && (motorDirection == HIGH) ){
       nEncoderSteps --;
       stepCounted = true;
       Serial.println("1");
