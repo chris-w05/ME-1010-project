@@ -4,133 +4,132 @@
 Servo angleServo;
 Servo ballDrop;
 
-// pins 
+// pins
 const int angleServoPin = 9;
 const int ballDropPin = 8;
 const int solenoidPin = 6;
-const int motorDirPin =  4;
+const int motorDirPin = 4;
 const int motorPowerPin = 5;
+// sensor pins
 const int irPin = A5;
 const int buttonsPin = A7;
 const int leftSwitchPin = 12;
 const int rightSwitchPin = 11;
-const int ballSensorPin = 10; //Needs to be changed
+const int ballSensorPin = 10;  //Needs to be changed
 
 
-// constants/variables
-struct Coordinate{
+//Structures -----------------------------------------------------------------------------------------------------
+struct Coordinate {
   float x;
   float y;
 };
 
-struct lengthSet{
+struct lengthSet {
   float l1;
   float l2;
   float l3;
   float l4;
 };
 
-struct servoParams{
+struct servoParams {
   float alpha = 0;
   float beta = 0;
   float thetaL0 = 0;
 };
 
-//states
-enum state{
+//enums       -----------------------------------------------------------------------------------------------------
+enum state {
   LOADING,
   TOSHOT,
   FROMSHOT,
+  DONE,
 };
 
-enum shotType{
-  FIXEDSHOTVEL,
-  FIXEDSHOTANGLE,
-};
-
-enum mode{
+enum mode {
   WHILEMOVING,
   STATIONARY,
 };
 
-//constants
-const lengthSet servoBars = {0.0866, 0.025, 0.1060, 0.0750};
-const lengthSet launchBars = {0.0866, 0.0750, 0.1060, 0.025};
+//constants   -----------------------------------------------------------------------------------------------------
+//four bar control
+const lengthSet servoBars = { 0.0866, 0.025, 0.1060, 0.0750 };
+const lengthSet launchBars = { 0.0866, 0.0750, 0.1060, 0.025 };
 const servoParams sParams;
-const float shotVel = 3.2; // m/s
-const float g = 9.81; // m/s^2
+const float loadAngle = 120;           //deg, check this
+
+//trajectory constants
+const float shotVel = 3.2;  // m/s
+const float g = 9.81;       // m/s^2
 const float d1 = 0.0876;
 const float d2 = .1190;
-const float shotTolerance = .01; //m,  should be between 1/2 and 1 times the encoder resolution
-//motor PID:
+
+//
+const float shotTolerance = .02;  //m,  should be between 1/2 and 1 times the encoder resolution
+
+//motor PID (completely over the top and probably wont be used):
 const float kP = 30;
 const float kI = 0.0;
 const float kD = 0.3;
 
+//encoder constants
+const float encoderOffset = 0.06;
+const float encoderResolution = 0.01;  // m - need to measure
+const float irHighThresh = 660;
+const float irLowThresh = 55;
 
-const float loadAngle = 120; //deg, check this
-const float CYCLETIME = 0.0000625; //time per each iteration of the code
-const float encoderResolution = 0.01; // m - need to measure
-const float irHighThresh = 590;
-const float irLowThresh = 60;
-
+//variables   -----------------------------------------------------------------------------------------------------
+//shot control
 Coordinate shotList[] = {
-        {0.01, 1.2},  
-        {0.02, .5},  
-        {0.02, .3}   
-    };
-
-
-//variables
-shotType shotMode = FIXEDSHOTVEL;
-mode movingMode = WHILEMOVING;
-state currentState;
+  { 0.1, 1.2 },
+  { 0.2, .5 },
+  { 0.3, .3 }
+};
+const int numShots = 3;
 int shotNum = 0;
-float targetX = 0;
-float targetY = 0;
+float shotAngle;
 
+//state control
+mode movingMode = STATIONARY;
+state currentState;
 bool hasBall;
+
+//motor/positional control
 int motorDirection;
 int nEncoderSteps = 0;
 bool stepCounted = false;
 float lastXPos = 0;
+float xGoal = 0;
 float xPosition = 0;
-float xPositionTimeBased = 0;
 float accumulatedX = 0;
 float dX = 0;
 float shootAtX;
-float shotAngle;
+
+//time stuff
+unsigned long lastPrintTime = 0;
+unsigned long lastCycleTime = 0;
+unsigned long shotTime = 0;
+int interval = 500;
+
+//sensor values
+bool leftSwitchVal;
+bool rightSwitchVal;
+int irVal;
+int buttonVal;
+float angleServoPos;
 
 
+//setup -----------------------------------------------------------------------------------------------------
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
-  Serial.print("findingAngle");
-  targetX = shotList[0].x;
-  targetY = shotList[0].y;
 
-  shotAngle = shallowAngleFromRange(d1, d2, shotVel, targetX);
+  xGoal = shotList[0].x;
 
-  Serial.print("Target: ");
-  Serial.print(targetX);
-  Serial.print(", ");
-  Serial.println(targetY);
-  Serial.print("Launch angle: ");
-  Serial.println(shotAngle);
-
-
-  shotAngle = steepAngleFromRange(d1, d2, shotVel, targetX);
-  //shotAngle = 110;
-
-  Serial.print("Target: ");
-  Serial.print(targetX);
-  Serial.print(", ");
-  Serial.println(targetY);
-  Serial.print("Launch angle: ");
-  Serial.print(shotAngle);
+  shotAngle = 45;
+  shotNum = 0;
 
   currentState = LOADING;
-  hasBall = false;
+  hasBall = true;
 
   pinMode(solenoidPin, OUTPUT);
   pinMode(leftSwitchPin, INPUT_PULLUP);
@@ -138,82 +137,57 @@ void setup() {
 
   angleServo.attach(angleServoPin);
 
-  //Move motors to starting configuration
-  Serial.println("Seroingh");
   zeroX();
-
 }
 
+//loop  -----------------------------------------------------------------------------------------------------
 void loop() {
-  // put your main code here, to run repeatedly:
-  xPosition = xPosFromEncoder();
-
-  if( hasBall ){
-    currentState = TOSHOT;
-    motorDirection = LOW;
-  }
-  else if( xPosition >= encoderResolution + 0.001){
-    currentState = FROMSHOT;
-    motorDirection = HIGH;
-    targetX = 0;
-  }
-  else{
-    currentState = LOADING;
-    //GET RID OF THIS WHEN THERE IS A SENSOR TO DETECT THE BALL
-    hasBall = true;
-  }
-
-  //determine theta and x to shoot from
-  //shotAngle = shallowAngleFromRange(d1, d2, shotVel, targetY);
-  if( movingMode = WHILEMOVING){
-    shootAtX = launchXOffset(dX, d1, d2, shotVel, shotAngle);
-  }
-  else{
-    shootAtX = targetX;
-  }
-
+  /*
+  psuedocode:
+  -> read sensors to find data for current iteration of loop
+  -> update the position estimate
+  -> update the state using the above two
+  -> (optional) print state
+  -> run command associated with current state
+  -> if x position (updated from updateposition) is > than than the target X and the mode is in TOSHOT
+    -> fire cannon
+    -> after 30 ms retract servo as not to burn it out
+  */
+  readSensors(); //this is the only place the sensor values should be updated from
+  updatePosition(); //if this is not called every loop position data will be innacurate
+  detectAndSetState();
+  printStates();
 
   //what to do depending on mode
-  switch( currentState){
-    LOADING:
-    angleServo.write(loadAngle);
-    hasBall = true;
+  switch (currentState) {
+    case LOADING:
+      loading();
+      break;
 
+    case TOSHOT:
+      toShot();
+      break;
 
-    TOSHOT:
-    digitalWrite( motorDirPin, motorDirection);
-    analogWrite( motorPowerPin, xControl());
-    angleServo.write(thetaServo(shotAngle));
+    case FROMSHOT:
+      fromShot();
+      break;
 
-
-    FROMSHOT:
-    digitalWrite( motorDirPin, motorDirection);
-    analogWrite( motorPowerPin, xControl());
-    angleServo.write(thetaServo(loadAngle));
+    case DONE:
+      done();
+      break;
   }
 
   //shooting
-  if( (xPosition > shootAtX - shotTolerance) && 
-  (xPosition < shootAtX + shotTolerance)){
-    if(movingMode = STATIONARY){
-      //ensures the shot has no horizontal velocity
-      analogWrite(motorPowerPin, brake());
-      delay(100);
+  if((xPosition > shotList[shotNum].x) && (currentState == TOSHOT )){
+    //take shot 
+    shoot();
+    //find where next shot needs to be taken
+    setShootAtX();
+  }
+  else {
+    if( millis() - shotTime > 30 ){
+      digitalWrite(solenoidPin, LOW);
     }
-    digitalWrite(solenoidPin, HIGH);
-    delay(30);
-    digitalWrite(solenoidPin, LOW);
-    hasBall = false;
-    shotNum ++;
-  }
-  else{
-    digitalWrite(solenoidPin, LOW);
   }
 
-  //update position estimate
-  dX = xPosition - lastXPos;
-  lastXPos = xPosition;
-  
-  accumulatedX = targetX - xPosition;
 }
-
